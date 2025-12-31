@@ -3,12 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>New Year 2026 - Fireworks Celebration</title>
+    <title>New Year 2026 - Gold & Speed Edition</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #02020a; font-family: 'Arial', sans-serif; }
+        body { margin: 0; overflow: hidden; background-color: #010105; font-family: 'Arial', sans-serif; }
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            pointer-events: none; z-index: 100;
+        }
+        #countdown-text {
+            color: #FFD700; font-size: 10rem; font-weight: bold;
+            text-shadow: 0 0 30px #FFD700; opacity: 0; transform: scale(0);
+        }
         #title-container {
             position: absolute; top: 30px; width: 100%; text-align: center;
-            z-index: 10; pointer-events: none;
+            z-index: 10; pointer-events: none; opacity: 0;
         }
         h1 {
             margin: 0; color: #FFB6C1; font-size: 3.5rem; letter-spacing: 5px;
@@ -20,7 +29,7 @@
         }
         #hint {
             position: absolute; bottom: 20px; width: 100%; text-align: center;
-            color: #ffffff; opacity: 0.8; z-index: 10; font-size: 1rem; background-color: rgba(0,0,0,0.5); padding: 10px 0;
+            color: #ffffff; opacity: 0.8; z-index: 10; font-size: 1.2rem;
         }
     </style>
     <script type="importmap">
@@ -33,11 +42,16 @@
     </script>
 </head>
 <body>
+    <div id="ui-layer">
+        <div id="countdown-text">3</div>
+    </div>
+
     <div id="title-container">
         <h1>HAPPY NEW YEAR 2026</h1>
     </div>
-    <div id="loading">Đang chuẩn bị pháo hoa...</div>
-    <div id="hint">Click vào BÁNH để bung tỏa ảnh kỷ niệm!</div>
+    
+    <div id="loading">Đang tải tài nguyên...</div>
+    <div id="hint">CHẠM VÀO MÀN HÌNH ĐỂ BẮT ĐẦU ĐẾM NGƯỢC</div>
 
     <audio id="bgMusic" loop>
         <source src="./picture/Một Năm Mới Bình An.mp3" type="audio/mpeg">
@@ -54,40 +68,36 @@
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
     import gsap from 'https://cdn.skypack.dev/gsap';
 
-    // --- LINK ẢNH ---
     const MY_PHOTOS = [
-        './picture/Unknown.jpg',
-        './picture/Unknown-2.jpg',
-        './picture/Unknown-3.jpg',
-        './picture/Unknown-4.jpg',
-        './picture/Unknown-5.jpg',
-        './picture/Unknown-6.jpg'
+        './picture/Unknown.jpg', './picture/Unknown-2.jpg', './picture/Unknown-3.jpg',
+        './picture/Unknown-4.jpg', './picture/Unknown-5.jpg', './picture/Unknown-6.jpg'
     ];
 
     const COUNT = 9000; 
-    let currentState = 0;
+    let currentState = 0; 
+    let isStarted = false; 
     let scene, camera, renderer, controls, composer;
-    let sphereMesh, cubeMesh;
+    let sphereMesh, cubeMesh, candleGroup;
     const dummy = new THREE.Object3D();
     const particlesData = [];
     const targetPositions = { cake: [], text: [], heart: [] };
-    const candles = [];
     const photoFrames = [];
-    let candleGroup;
-    let isAudioPlaying = false;
+    const candles = [];
+    let activeExplosions = [];
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
     let activeZoomedFrame = null;
-
-    // Mảng chứa các vụ nổ pháo hoa đang hoạt động
-    let activeExplosions = [];
+    
+    // Định nghĩa màu sắc
+    const HEART_COLOR = new THREE.Color(0xFF0055); // Hồng đậm cho tim
+    const GOLD_COLOR = new THREE.Color(0xFFD700);  // Vàng Gold cho chữ 2026 (MỚI)
 
     init();
 
     async function init() {
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 15, 55);
+        camera.position.set(0, 15, 60);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -101,9 +111,12 @@
         const baseMat = new THREE.MeshStandardMaterial({ metalness: 0.1, roughness: 0.6 });
         sphereMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.18, 8, 8), baseMat, COUNT / 2);
         cubeMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), baseMat, COUNT / 2);
+        
+        sphereMesh.scale.set(0,0,0);
+        cubeMesh.scale.set(0,0,0);
         scene.add(sphereMesh, cubeMesh);
 
-        generateRoyalDecoratedCake();
+        generateRoyalCake();
         await generateTextPoints("2026", targetPositions.text, 10);
         await generateFlatHeartWithText();
 
@@ -111,179 +124,190 @@
             const isSphere = i < COUNT / 2;
             const mesh = isSphere ? sphereMesh : cubeMesh;
             const idx = isSphere ? i : i - (COUNT / 2);
-            
-            let color = new THREE.Color(0xFFFFFF); 
-            if (i % 3 === 0) color.set(0xFFB6C1); 
-            if (i % 15 === 0) color.set(0xFF0000); 
-            if (i % 20 === 0) color.set(0xFFD700); 
-
+            let color = new THREE.Color(i % 3 === 0 ? 0xFFB6C1 : 0xFFFFFF); 
             mesh.setColorAt(idx, color);
-            particlesData.push({
-                currentPos: targetPositions.cake[i].clone(),
-                mesh: mesh,
+            particlesData.push({ 
+                currentPos: targetPositions.cake[i].clone(), 
+                mesh, 
                 index: idx,
-                speed: 0.04 + Math.random() * 0.04
+                originalColor: color.clone() 
             });
         }
         sphereMesh.instanceColor.needsUpdate = true;
         cubeMesh.instanceColor.needsUpdate = true;
 
         createHighCandles();
+        candleGroup.scale.set(0,0,0); 
+
         createPhotoFrames();
 
         composer = new EffectComposer(renderer);
         composer.addPass(new RenderPass(scene, camera));
-        composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.3, 0.5, 0.85));
+        composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.5, 0.85));
 
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.autoRotate = true;
-        controls.autoRotateSpeed = 0.5;
+        controls.autoRotate = false;
 
-        window.addEventListener('click', onMouseClick);
+        window.addEventListener('click', onInitialClick);
         window.addEventListener('resize', onWindowResize);
 
         document.getElementById('loading').style.display = 'none';
         animate();
     }
 
-    // --- HỆ THỐNG PHÁO HOA MỚI ---
+    // --- CÁC HÀM LOGIC ---
 
-    // 1. Hàm bắn pháo hoa (Rocket)
-    function launchFirework() {
-        const startX = (Math.random() - 0.5) * 30;
-        const targetY = 15 + Math.random() * 10; // Nổ ở độ cao trên đỉnh bánh
-        
-        // Tạo một hạt "tên lửa" sáng
-        const rocketGeo = new THREE.SphereGeometry(0.3, 8, 8);
-        const rocketMat = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
-        const rocket = new THREE.Mesh(rocketGeo, rocketMat);
-        rocket.position.set(startX, -25, 0); // Bắt đầu từ dưới đáy
+    function onInitialClick(event) {
+        if (!isStarted) {
+            isStarted = true;
+            document.getElementById('hint').style.display = 'none';
+            const audio = document.getElementById('bgMusic');
+            audio.play().catch(() => console.log("Cần tương tác để phát nhạc"));
+            runCountdown();
+        } else {
+            onMouseClick(event);
+        }
+    }
+
+    function runCountdown() {
+        const el = document.getElementById('countdown-text');
+        const tl = gsap.timeline();
+        [3, 2, 1].forEach((num) => {
+            tl.to(el, { 
+                onStart: () => { el.innerText = num; },
+                opacity: 1, scale: 2, duration: 0.5, ease: "back.out(2)" 
+            });
+            tl.to(el, { opacity: 0, scale: 0, duration: 0.5, ease: "power2.in" });
+        });
+        tl.call(() => { launchBigIntroFirework(); });
+    }
+
+    function launchBigIntroFirework() {
+        const rocket = new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshBasicMaterial({ color: 0xFFFFFF }));
+        rocket.position.set(0, -30, 0);
         scene.add(rocket);
-
-        // Bay lên bằng GSAP
         gsap.to(rocket.position, {
-            y: targetY,
-            duration: 1.5 + Math.random(),
-            ease: "power2.out",
+            y: 5, duration: 1.2, ease: "power2.out",
             onComplete: () => {
                 scene.remove(rocket);
-                createExplosion(rocket.position); // Nổ khi đến đích
+                createExplosion(rocket.position, 600, 3.5); 
+                revealMainScene();
             }
         });
     }
 
-    // 2. Hàm tạo vụ nổ (Explosion)
-    function createExplosion(position) {
-        const particleCount = 150;
-        const geo = new THREE.BufferGeometry();
-        const positions = new Float32Array(particleCount * 3);
-        const colors = new Float32Array(particleCount * 3);
-        const velocities = [];
-
-        const color = new THREE.Color();
-        color.setHSL(Math.random(), 1, 0.6); // Màu ngẫu nhiên rực rỡ
-
-        for (let i = 0; i < particleCount; i++) {
-            positions[i * 3] = position.x;
-            positions[i * 3 + 1] = position.y;
-            positions[i * 3 + 2] = position.z;
-
-            color.toArray(colors, i * 3);
-
-            // Vận tốc nổ ngẫu nhiên theo hình cầu
-            const velocity = new THREE.Vector3(
-                (Math.random() - 0.5) * 2,
-                (Math.random() - 0.5) * 2,
-                (Math.random() - 0.5) * 2
-            );
-            velocity.normalize().multiplyScalar(Math.random() * 0.8);
-            velocities.push(velocity);
-        }
-
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-        const mat = new THREE.PointsMaterial({
-            size: 0.4,
-            vertexColors: true,
-            transparent: true,
-            opacity: 1,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false
-        });
-
-        const explosion = new THREE.Points(geo, mat);
-        explosion.userData = { velocities, gravity: -0.015, life: 1.0 };
-        scene.add(explosion);
-        activeExplosions.push(explosion);
+    function revealMainScene() {
+        gsap.to(sphereMesh.scale, { x: 1, y: 1, z: 1, duration: 2, ease: "elastic.out(1, 0.5)" });
+        gsap.to(cubeMesh.scale, { x: 1, y: 1, z: 1, duration: 2, ease: "elastic.out(1, 0.5)" });
+        gsap.to(candleGroup.scale, { x: 1, y: 1, z: 1, duration: 2, delay: 0.5 });
+        gsap.to(document.getElementById('title-container'), { opacity: 1, duration: 2 });
+        
+        // Bật tự động xoay và tăng tốc độ (MỚI)
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 1.2; // Tăng từ 0.5 lên 1.2
+        
+        document.getElementById('hint').innerText = "Click Bánh để hiện Ảnh | Click Ảnh để phóng to";
+        document.getElementById('hint').style.display = 'block';
     }
 
-    // --- CÁC HÀM CŨ (GIỮ NGUYÊN) ---
-    function generateRoyalDecoratedCake() {
+    function onMouseClick(event) {
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        const intersects = raycaster.intersectObjects(photoFrames);
+
+        if (intersects.length > 0) {
+            const frame = intersects[0].object;
+            if (activeZoomedFrame === frame) {
+                zoomOutFrame(frame);
+            } else {
+                if (activeZoomedFrame) zoomOutFrame(activeZoomedFrame);
+                zoomInFrame(frame);
+            }
+        } else {
+            if (activeZoomedFrame) {
+                zoomOutFrame(activeZoomedFrame);
+            } else {
+                changeFormationState();
+            }
+        }
+    }
+
+    function zoomInFrame(f) {
+        activeZoomedFrame = f;
+        f.userData.isZoomed = true;
+        const targetPos = new THREE.Vector3();
+        camera.getWorldDirection(targetPos);
+        targetPos.multiplyScalar(18).add(camera.position); 
+        gsap.to(f.position, { 
+            x: targetPos.x, y: targetPos.y, z: targetPos.z, 
+            duration: 1.2, ease: "power3.out" 
+        });
+    }
+
+    function zoomOutFrame(f) {
+        f.userData.isZoomed = false;
+        activeZoomedFrame = null;
+        gsap.to(f.position, { 
+            x: f.userData.originalPos.x, y: f.userData.originalPos.y, z: f.userData.originalPos.z, 
+            duration: 1, ease: "power2.inOut" 
+        });
+    }
+
+    function changeFormationState() {
+        currentState = (currentState + 1) % 3;
+        gsap.to(candleGroup.scale, { x: currentState === 0 ? 1 : 0, y: currentState === 0 ? 1 : 0, z: currentState === 0 ? 1 : 0, duration: 0.6 });
+        photoFrames.forEach(f => {
+            const s = currentState === 1 ? 1 : 0.001;
+            gsap.to(f.scale, { x: s, y: s, z: s, duration: 1.2, ease: "back.out(1.7)", delay: Math.random()*0.5 });
+        });
+    }
+
+    function generateRoyalCake() {
         const tiers = [{ r: 10, h: 4, y: -9 }, { r: 8.5, h: 4, y: -5 }, { r: 7, h: 4, y: -1 }, { r: 5.5, h: 4, y: 3 }, { r: 4, h: 4, y: 7 }];
         tiers.forEach(t => {
-            const perTier = Math.floor(COUNT / 5);
-            for (let i = 0; i < perTier; i++) {
+            for (let i = 0; i < COUNT/5; i++) {
                 const angle = Math.random() * Math.PI * 2;
                 const r = Math.random() > 0.7 ? t.r : Math.sqrt(Math.random()) * t.r;
                 targetPositions.cake.push(new THREE.Vector3(r * Math.cos(angle), Math.random() * t.h + t.y, r * Math.sin(angle)));
             }
         });
-        while(targetPositions.cake.length < COUNT) targetPositions.cake.push(new THREE.Vector3(0,0,0));
     }
 
     async function generateTextPoints(txt, targetArray, size) {
         const loader = new FontLoader();
         const font = await loader.loadAsync('https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_bold.typeface.json');
-        const geo = new TextGeometry(txt, { font: font, size: size, height: 1 });
-        geo.center();
+        const geo = new TextGeometry(txt, { font: font, size: size, height: 1 }); geo.center();
         const sampler = new MeshSurfaceSampler(new THREE.Mesh(geo)).build();
-        const needed = COUNT - targetArray.length;
-        for (let i = 0; i < needed; i++) {
-            const p = new THREE.Vector3();
-            sampler.sample(p);
-            targetArray.push(p);
-        }
+        for (let i = 0; i < COUNT; i++) { const p = new THREE.Vector3(); sampler.sample(p); targetArray.push(p); }
     }
 
     async function generateFlatHeartWithText() {
-        const textCount = Math.floor(COUNT * 0.3);
         const loader = new FontLoader();
         const font = await loader.loadAsync('https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_bold.typeface.json');
         const textGeo = new TextGeometry("I LOVE YOU", { font: font, size: 3, height: 0.5 });
         textGeo.center(); textGeo.translate(0, 5, 0); 
         const sampler = new MeshSurfaceSampler(new THREE.Mesh(textGeo)).build();
-        
-        const pts = [];
-        for(let i = 0; i < textCount; i++) {
-            const p = new THREE.Vector3();
-            sampler.sample(p);
-            p.z = (Math.random() - 0.5) * 0.2; 
-            pts.push(p);
+        for(let i=0; i<COUNT*0.3; i++) { const p = new THREE.Vector3(); sampler.sample(p); targetPositions.heart.push(p); }
+        for(let i=0; i<COUNT*0.7; i++) {
+            const t = Math.random()*Math.PI*2;
+            let x = 16*Math.pow(Math.sin(t),3); 
+            let y = 13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+            x *= 1.2; y = y * 1.2 + 5; 
+            targetPositions.heart.push(new THREE.Vector3(x, y, (Math.random()-0.5)));
         }
-        for (let i = 0; i < (COUNT - textCount); i++) {
-            const t = Math.random() * Math.PI * 2;
-            let x = 16 * Math.pow(Math.sin(t), 3);
-            let y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
-            pts.push(new THREE.Vector3(x * 0.8, y * 0.8 + 5, (Math.random()-0.5)));
-        }
-        targetPositions.heart = pts.sort(() => Math.random() - 0.5);
     }
 
     function createHighCandles() {
         candleGroup = new THREE.Group();
-        const candleGeo = new THREE.CylinderGeometry(0.12, 0.12, 3, 12);
-        const candleMat = new THREE.MeshStandardMaterial({ color: 0xFFF0F5, emissive: 0xFFB6C1 });
-        const flameGeo = new THREE.SphereGeometry(0.35, 8, 8);
         for (let i = 0; i < 8; i++) {
-            const angle = (i / 8) * Math.PI * 2;
-            const candle = new THREE.Mesh(candleGeo, candleMat);
-            candle.position.set(Math.cos(angle) * 3.5, 13, Math.sin(angle) * 3.5);
-            const flame = new THREE.Mesh(flameGeo, new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
+            const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 3), new THREE.MeshStandardMaterial({ color: 0xFFF0F5, emissive: 0xFFB6C1 }));
+            candle.position.set(Math.cos(i/8*Math.PI*2)*3.5, 12.5, Math.sin(i/8*Math.PI*2)*3.5);
+            const flame = new THREE.Mesh(new THREE.SphereGeometry(0.35), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
             flame.position.set(0, 1.8, 0); candle.add(flame);
-            const light = new THREE.PointLight(0xff6600, 25, 12);
-            light.position.set(0, 2, 0); candle.add(light);
+            const light = new THREE.PointLight(0xff6600, 25, 12); light.position.set(0, 2, 0); candle.add(light);
             candles.push({ flame, light }); candleGroup.add(candle);
         }
         scene.add(candleGroup);
@@ -292,154 +316,87 @@
     function createPhotoFrames() {
         const loader = new THREE.TextureLoader();
         MY_PHOTOS.forEach((url, i) => {
-            const tex = loader.load(url);
-            const frame = new THREE.Mesh(new THREE.PlaneGeometry(5, 7), new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
-            const angle = (i / MY_PHOTOS.length) * Math.PI * 2;
-            frame.position.set(Math.cos(angle) * 22, Math.random() * 8 - 4, Math.sin(angle) * 22);
-            frame.scale.set(0.001, 0.001, 0.001); 
-            frame.userData = { originalPos: frame.position.clone(), isZoomed: false };
-            scene.add(frame);
-            photoFrames.push(frame);
+            const frame = new THREE.Mesh(new THREE.PlaneGeometry(5.5, 7.5), new THREE.MeshLambertMaterial({ map: loader.load(url), side: THREE.DoubleSide }));
+            frame.position.set(Math.cos(i/MY_PHOTOS.length*Math.PI*2)*24, Math.random()*8-4, Math.sin(i/MY_PHOTOS.length*Math.PI*2)*24);
+            frame.scale.set(0.001,0.001,0.001); frame.userData = { originalPos: frame.position.clone(), isZoomed: false };
+            scene.add(frame); photoFrames.push(frame);
         });
     }
 
-    function onMouseClick(event) {
-        if (!isAudioPlaying) {
-            document.getElementById('bgMusic').play();
-            isAudioPlaying = true;
-            controls.autoRotate = false;
+    function createExplosion(pos, pCount, pSpeed) {
+        const geo = new THREE.BufferGeometry();
+        const positions = new Float32Array(pCount * 3);
+        const colors = new Float32Array(pCount * 3);
+        const velocities = [];
+        const col = new THREE.Color().setHSL(Math.random(), 1, 0.6);
+        for (let i = 0; i < pCount; i++) {
+            positions.set([pos.x, pos.y, pos.z], i * 3);
+            col.toArray(colors, i * 3);
+            velocities.push(new THREE.Vector3().randomDirection().multiplyScalar(Math.random() * pSpeed));
         }
-
-        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-
-        if (currentState === 1) {
-            const intersects = raycaster.intersectObjects(photoFrames);
-            if (intersects.length > 0) {
-                const clickedFrame = intersects[0].object;
-                if (activeZoomedFrame === clickedFrame) zoomOutFrame(clickedFrame);
-                else {
-                    if (activeZoomedFrame) zoomOutFrame(activeZoomedFrame);
-                    zoomInFrame(clickedFrame);
-                }
-                return;
-            }
-        }
-
-        if (activeZoomedFrame) zoomOutFrame(activeZoomedFrame);
-        else changeFormationState();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const mat = new THREE.PointsMaterial({ size: 0.5, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending });
+        const points = new THREE.Points(geo, mat);
+        points.userData = { velocities, life: 1.0 };
+        scene.add(points);
+        activeExplosions.push(points);
     }
 
-    function zoomInFrame(frame) {
-        activeZoomedFrame = frame;
-        frame.userData.isZoomed = true;
-        const targetPos = new THREE.Vector3();
-        camera.getWorldDirection(targetPos);
-        targetPos.multiplyScalar(15).add(camera.position);
-        gsap.to(frame.position, { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration: 1.2, ease: "power2.out" });
-    }
-
-    function zoomOutFrame(frame) {
-        frame.userData.isZoomed = false;
-        activeZoomedFrame = null;
-        gsap.to(frame.position, { x: frame.userData.originalPos.x, y: frame.userData.originalPos.y, z: frame.userData.originalPos.z, duration: 1 });
-    }
-
-    function changeFormationState() {
-        currentState = (currentState + 1) % 3;
-        gsap.to(candleGroup.scale, { 
-            x: currentState === 0 ? 1 : 0.001, 
-            y: currentState === 0 ? 1 : 0.001, 
-            z: currentState === 0 ? 1 : 0.001, 
-            duration: 0.6 
-        });
-        photoFrames.forEach(f => {
-            const targetScale = (currentState === 1) ? 1 : 0.001;
-            gsap.to(f.scale, { 
-                x: targetScale, y: targetScale, z: targetScale, 
-                duration: 1.2, ease: "back.out(1.7)", delay: Math.random() * 0.5 
-            });
-        });
-        const hints = ["Click vào BÁNH để bung tỏa ảnh kỷ niệm!", "Click vào ẢNH để xem to | Click nền để xem Trái Tim", "Món quà tình yêu! Click nền để quay lại Bánh"];
-        document.getElementById('hint').innerText = hints[currentState];
-    }
-
-    function onWindowResize() {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        composer.setSize(window.innerWidth, window.innerHeight);
-    }
+    function onWindowResize() { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
 
     function animate() {
         requestAnimationFrame(animate);
         const time = performance.now() * 0.001;
 
-        // --- LOGIC TỰ ĐỘNG BẮN PHÁO HOA ---
-        // Khoảng 1.5% cơ hội mỗi khung hình sẽ bắn một quả (tức là cứ ~1 giây có 1 quả)
-        if (Math.random() < 0.015) {
-            launchFirework();
-        }
+        if (isStarted && Math.random() < 0.02) createExplosion({x: (Math.random()-0.5)*50, y: 15+Math.random()*15, z: (Math.random()-0.5)*30}, 120, 0.6);
 
-        // --- CẬP NHẬT CÁC VỤ NỔ ĐANG HOẠT ĐỘNG ---
         for (let i = activeExplosions.length - 1; i >= 0; i--) {
-            const explosion = activeExplosions[i];
-            const positions = explosion.geometry.attributes.position.array;
-            const velocities = explosion.userData.velocities;
-            explosion.userData.life -= 0.015; // Giảm tuổi thọ
-
-            for (let j = 0; j < velocities.length; j++) {
-                velocities[j].y += explosion.userData.gravity; // Áp dụng trọng lực
-                positions[j * 3] += velocities[j].x;
-                positions[j * 3 + 1] += velocities[j].y;
-                positions[j * 3 + 2] += velocities[j].z;
+            const e = activeExplosions[i]; const pos = e.geometry.attributes.position.array; const vel = e.userData.velocities;
+            e.userData.life -= 0.012;
+            for (let j=0; j<vel.length; j++) {
+                vel[j].y -= 0.008; pos[j*3]+=vel[j].x; pos[j*3+1]+=vel[j].y; pos[j*3+2]+=vel[j].z;
             }
-            explosion.geometry.attributes.position.needsUpdate = true;
-            explosion.material.opacity = explosion.userData.life; // Mờ dần
-
-            // Xóa vụ nổ khi hết tuổi thọ
-            if (explosion.userData.life <= 0) {
-                scene.remove(explosion);
-                activeExplosions.splice(i, 1);
-            }
+            e.geometry.attributes.position.needsUpdate = true; e.material.opacity = e.userData.life;
+            if (e.userData.life <= 0) { scene.remove(e); activeExplosions.splice(i, 1); }
         }
-        
-        // Logic hạt chính (giữ nguyên)
-        let targets;
-        if (currentState === 0) targets = targetPositions.cake;
-        else if (currentState === 1) targets = targetPositions.text;
-        else targets = targetPositions.heart;
 
+        const targets = currentState === 0 ? targetPositions.cake : (currentState === 1 ? targetPositions.text : targetPositions.heart);
         for (let i = 0; i < COUNT; i++) {
-            const d = particlesData[i];
-            const target = targets[i].clone();
+            const d = particlesData[i]; const target = targets[i].clone();
+            
+            // CẬP NHẬT MÀU SẮC THEO TRẠNG THÁI (MỚI)
+            let currentColor = new THREE.Color();
+            d.mesh.getColorAt(d.index, currentColor);
+            if (currentState === 2) { 
+                currentColor.lerp(HEART_COLOR, 0.05); // Trái tim -> Hồng đậm
+            } else if (currentState === 1) {
+                currentColor.lerp(GOLD_COLOR, 0.05); // 2026 -> Vàng Gold
+            } else {
+                currentColor.lerp(d.originalColor, 0.05); // Bánh -> Màu gốc
+            }
+            d.mesh.setColorAt(d.index, currentColor);
+
             if (currentState === 0) target.y += Math.sin(time + i * 0.2) * 0.15;
             d.currentPos.lerp(target, 0.08);
-            dummy.position.copy(d.currentPos);
-            dummy.rotation.set(time * 0.3, time * 0.1, 0);
-            dummy.updateMatrix();
+            dummy.position.copy(d.currentPos); dummy.rotation.set(time*0.3, time*0.1, 0); dummy.updateMatrix();
             d.mesh.setMatrixAt(d.index, dummy.matrix);
         }
-        sphereMesh.instanceMatrix.needsUpdate = true;
-        cubeMesh.instanceMatrix.needsUpdate = true;
-
-        if (currentState === 0) {
-            candles.forEach((c, i) => {
-                const f = Math.random() * 0.3 + 0.8;
-                c.flame.scale.set(f, f + Math.sin(time * 20 + i) * 0.3, f);
-                c.light.intensity = 30 * f;
-            });
+        sphereMesh.instanceColor.needsUpdate = true; cubeMesh.instanceColor.needsUpdate = true;
+        sphereMesh.instanceMatrix.needsUpdate = true; cubeMesh.instanceMatrix.needsUpdate = true;
+        
+        if (currentState === 0 && candleGroup.scale.x > 0.5) {
+            candles.forEach((c, i) => { const f = Math.random()*0.3+0.8; c.flame.scale.set(f, f+Math.sin(time*20+i)*0.3, f); c.light.intensity = 35*f; });
         }
-
-        photoFrames.forEach((f, i) => {
-            f.lookAt(camera.position);
-            if (!f.userData.isZoomed && f.scale.x > 0.1) {
-                f.position.y = f.userData.originalPos.y + Math.sin(time + i) * 0.5;
+        
+        photoFrames.forEach(f => { 
+            f.lookAt(camera.position); 
+            if (!f.userData.isZoomed && f.scale.x > 0.5) {
+                f.position.y = f.userData.originalPos.y + Math.sin(time + photoFrames.indexOf(f)) * 0.5;
             }
         });
-
-        controls.update();
+        
+        controls.update(); 
         composer.render();
     }
 </script>
